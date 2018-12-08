@@ -1,0 +1,260 @@
+# Remove all variables
+rm(list=ls())
+
+# Set default directory at first
+
+#load the required packages 
+require(dplyr)
+require(lubridate)
+require(ggplot2)
+require(scales)
+
+#Load the uber request data file into R. 
+
+uber <- read.csv("Uber request data.csv")
+
+# Check for ambiguity, duplicate, missing values
+# Check duplicate values
+
+sum(duplicated(uber$Request.id))     #No Duplicates, unique identifier
+
+# Check for missing values
+
+sum(is.na(uber$Request.timestamp))   #No missing values
+sum(is.na(uber$Request.id))          #No missing values
+sum(is.na(uber$Pickup.point))        #No missing values
+sum(is.na(uber$Request.id))          #No missing values
+sum(is.na(uber$Pickup.point))        #No missing values
+
+
+# Check for Similar values
+levels(uber$Status)                  #Unambiguous
+levels(uber$Pickup.point)            #Unambiguous
+
+# Trips completed should have Both Request.timestamp and Drop.timestamps and Driver.id
+trip_completed <- uber[which(uber$Status == "Trip Completed"),]  #subsetting for completed Trips
+sum(is.na(trip_completed$Request.timestamp))                      #All Timestamps present
+sum(is.na(trip_completed$Drop.timestamp))                         #All Timestamps present
+sum(is.na(trip_completed$Driver.id))                              #All Timestamps present
+
+# Cancelled Trips should have Request.timestamps and Driver.id
+trip_cancelled <- uber[which(uber$Status == "Cancelled"),]    #subsetting for cancelled Trips
+sum(is.na(trip_cancelled$Request.timestamp))                   #All Timestamps present
+sum(is.na(trip_cancelled$Driver.id))                           #All Timestamps present
+
+#Correcting Request Time
+uber$Request.timestamp<-parse_date_time(uber$Request.timestamp,orders=c("%d-%m-%Y %H:%M:%S","%d/%m/%Y %H:%M"), exact = TRUE)
+#Extract hourofday (two characters) from the Request time column into new coloumn
+uber$request_hour <- format(uber$Request.timestamp, "%H")
+#convert to numeric 
+uber$request_hour <- as.numeric(uber$request_hour)
+
+# Correcting Drop Time
+uber$Drop.timestamp <- parse_date_time(uber$Drop.timestamp,orders=c("%d-%m-%Y %H:%M:%S","%d/%m/%Y %H:%M"), exact = TRUE)
+
+
+# Deriving part of day based on request hour by defining a function
+uber$time_slot <- sapply(as.numeric(as.vector(uber$request_hour)),function(x){
+                  if(x %in% c(5,6,7,8,9)){
+                        return('Morning')
+                    }else if(x %in% c(10,11,12,13,14,15,16)){
+                             return('Day')
+                         }else if(x %in% c(17,18,19,20,21)){
+                                  return('Evening')
+                              }else if(x %in% c(22,23,0,1,2,3,4)){
+                                       return('Night')
+                  }else{
+                      return(NA)
+                    }
+                 })
+
+# ---------------Dataset Analysis------------------#
+
+
+# Mean Ride Time of completed trips
+summarise(uber, travelTime = mean(Drop.timestamp - Request.timestamp,na.rm = T))  # AVerage ride time = 52.4 mins
+
+# Average Non-Availability of Cars from Airport & City
+# From Airport
+uber[which(uber$Status == 'No Cars Available' & uber$Pickup.point == 'Airport'),] %>%
+  group_by(request_hour) %>%
+  summarise(non_availability = length(request_hour)) %>%
+  summarise(Average_Non_Availabilty = mean(non_availability,na.rm=T))      # 71 nos
+
+# From City
+uber[which(uber$Status == 'No Cars Available' & uber$Pickup.point == 'City'),] %>%
+  group_by(request_hour) %>%
+  summarise(NonAvailability = length(request_hour)) %>%                    # 39 nos
+  summarise(Average_Non_Availabilty = mean(NonAvailability,na.rm=T))       # 71 + 39 = 110
+
+
+# Frequency of requests from Pickup point
+summary(uber$Pickup.point)                              #Similar demand from both pickup point
+
+# Plot for the above summary
+plot1 <- ggplot(uber,aes(x=Pickup.point)) +
+   geom_bar() +                                         #Bar chart is easy to plot frequency
+    labs(x = "Pickup Point", y="Number of Requests",    #labs & title used for creating graph labels/title
+       title = "Overall Demand from Airport and City")+
+     geom_text(aes(y=(..count..),                       #geom_text for adding text to graph ..count.. identity to specify that the frequency itself is used
+                label=(..count..)),
+            stat='count',                               
+            vjust = -.3,                                #vjust for adjusting text position
+            size = 4)                                   # size for text size
+
+plot1    # View plot1
+
+
+# Frequency of Responses/Status to Requests
+summary(uber$Status)
+
+#Plot for the above summary
+plot2 <- ggplot(uber,aes(x=Status, fill = Status)) + 
+  geom_bar() +                                              # Bar plot used to show frequency in %age
+   geom_text(aes(y = (..count..), 
+                label = scales::percent((..count..)/sum(..count..))),
+            stat = 'count', 
+            vjust = -0.4,
+            size = 3.5) +
+  labs(x = 'Demand Response Status',
+       y='Number of Requests', 
+       title='Overall Response to Demand') +
+scale_fill_manual(values = c('#d85050','#cc2c2c','#1fd13c'))       #scale_fill_manual used for inserting bar colours using hex code
+
+plot2  #View plot2
+
+# Cumulative Demand pattern by hour for all days 
+
+uber %>% group_by(request_hour,Pickup.point) %>% summarise(Status.Count = length(Status))
+
+#save plot as object
+requestbyhour <- ggplot(uber,aes(x=factor(request_hour),fill= factor(Pickup.point)))
+plot3 <- requestbyhour + geom_bar(stat='count',position = "dodge")+
+     ggtitle("Hourly Demand for Uber Cabs")+                       # adding title 
+      labs(x="Hour of the day", y="Number of Cabs Requested")+     # adding label
+    labs(fill="Pickup Point") +                    
+      geom_text(aes(y=(..count..),
+            label=(..count..)),
+              stat='count',
+               vjust = -.5,
+                size = 2.5)
+plot3  #View plot3
+
+
+#plot a stacked bar chart with time slots on x-axis and request frequency on y-axis
+#show the status of requests in different colors, add title, axis labels 
+#mian problem area can easily be identified
+ time_slot_reqcount <- ggplot(uber,aes(x=factor(time_slot),fill=factor(Status))) 
+ plot4 <- time_slot_reqcount+geom_bar(stat="count",position = "stack",col="black")+
+    ggtitle("Trips during Different Time Slots")+
+    scale_x_discrete(limits=c("Morning","Day","Evening", "Night"))+
+    labs(x="Time Slots",y="Number of Requests")+labs(fill="Trip Status")+
+    scale_fill_discrete(limits=c("Trip Completed","No Cars Available","Cancelled"))
+  
+  
+plot4    # view plot4
+  
+  
+# Plot to find the frequency of requests based on location/Pickup point
+# Bar chart serves best to observe comparision of frequency
+
+request_by_time_slot <- ggplot(uber,aes(x=time_slot, fill = ..count..)) 
+plot5 <- request_by_time_slot + geom_bar() + 
+    geom_text(aes(y=(..count..),
+                  label=(..count..)),
+              stat='count',
+              vjust = -0.4,
+              size=4) +
+    scale_fill_gradient(low = '#b83312', high = '#33b812', space = 'lab')+
+    labs(x = "Time slot",
+         y="Number of Requests", 
+         fill = 'No. of Requests',
+         title='Overall Demand Throughout The Day') +
+    facet_grid(Pickup.point~.) + theme(strip.text.y = element_text(size = 15))+
+    coord_cartesian(ylim = c(0,2000))
+
+plot5     # View plot5
+ 
+# Analysis of Status based on Request Location in %age
+ 
+uber[,c('Pickup.point','Status')] %>% group_by(Pickup.point,Status) %>% summarise(Status.Count = length(Status))  
+  
+ggplot(uber,aes(x = Status, fill = Status)) +
+ geom_bar() +
+ scale_fill_manual(values = c('#b81313','#400808','#6dc14b')) +
+ labs(x = "Status", 
+      y = "Number of Requests", 
+      title = 'Overall Supply to Demand', 
+      subtitle = 'Based on Status of Request and Location')+
+   geom_text(data = uber[uber$Pickup.point == 'Airport',],
+           aes(y = (..count..), 
+               label = scales::percent(((..count..)/sum(..count..)))),
+             stat = 'count',
+             vjust = -1, 
+             size = 4)+
+   geom_text(data = uber[uber$Pickup.point == 'City',],
+             aes(y = (..count..),
+                 label = scales::percent(((..count..)/sum(..count..)))),
+             stat = 'count',
+             vjust = -1, 
+             size = 4)+
+   facet_grid(Pickup.point ~ .)+
+   theme(legend.position="none",
+         strip.text.y = element_text(size = 15)) +
+   coord_cartesian(ylim = c(0,2000))
+  
+
+# Analysing Demand and supply gap for both pickup location based on time_slot
+
+ uber %>%
+   group_by(Pickup.point,time_slot,Status) %>%
+   summarise(Status.Count = length(Status))
+ 
+# Plot to analyze demand and supply based on pickup point and TimeSlot of request
+# Multiple juxtaposed Bar chart is optimal to observe the frequency and copmarision
+ uber %>%
+   group_by(Pickup.point,time_slot,Status) %>%
+   summarise(Status.Count = length(Status)) %>%
+   ggplot(aes(x=time_slot,fill = Status)) +
+   geom_bar(aes(y=Status.Count, color = "Total Demand"),
+            stat = 'identity', 
+            fill ='#e5d6c5') +
+   geom_bar(aes(y=Status.Count), 
+            position = position_dodge(width=0.9),
+            stat = 'identity')+
+   scale_fill_manual(values = c('#c11717','#964646','#6dc14b')) +
+   scale_color_manual('',values = c('#e5d6c5')) +
+   facet_grid(Pickup.point ~ .)+
+   theme(strip.text.y = element_text(size = 15))+
+   labs(x='Time Slot ', 
+        y='Count of Demand and Supply', 
+        title='Demand and Supply Gap', 
+        subtitle='Based On Time Slot')
+ 
+#Analyzing Status of requests from both locations at differents timings
+ uber %>%
+   group_by(Pickup.point,request_hour,Status) %>%
+   summarise(Status.Count = length(Status))
+ 
+ # Plot to analyze demand and supply based on pickup point and Time of request
+ # Multiple juxtaposed Bar chart is optimal to observe the frequency and copmarision
+ uber %>%
+   group_by(Pickup.point,request_hour,Status) %>%
+   summarise(Status.Count = length(Status)) %>%
+   ggplot(aes(x=request_hour)) +
+   geom_bar(aes(y=Status.Count,color = 'Total Demand'),
+            stat = 'identity', 
+            fill = '#e5d6c5') +
+   geom_bar(aes(y=Status.Count,fill = Status), 
+            position = position_dodge(width=0.9),
+            stat = 'identity')+
+   scale_fill_manual(values = c('#c11717','#964646','#6dc14b')) +
+   scale_color_manual('',values = c('#e5d6c5')) +
+   facet_grid(Pickup.point ~ .)+
+   theme(strip.text.y = element_text(size = 15))+
+   labs(x='Hour Of The Day', 
+        y='Count of Demand and Supply', 
+        title='Demand and Supply Gap',
+        subtitle='Based On Time of The Day')
+ 
+
