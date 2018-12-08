@@ -1,0 +1,399 @@
+#EDA Case Study
+#Loading Libraries 
+#stringr, dplyr and plyr libraries to perform string & data manipulations
+#ggplot2 to create plots
+#lubridate to perform data operations
+#Should be installed using below syntax if not available
+# install.packages("ggplot2"), install.packages("chron") etc.
+library(stringr)
+library(plyr) 
+library(dplyr)
+library(ggplot2) 
+library(chron) 
+library(tidyr) 
+library(reshape2)
+library(lubridate)
+library(data.table)
+library(ggcorrplot)
+
+#Setting work Directory -> To be set accordingly
+setwd("~/PGDDS/EDACaseStudy")
+
+#Load dataset to R
+LoanDataSet <- read.csv("loan.csv", sep = ",", stringsAsFactors = TRUE)
+
+#View Dataset
+View(LoanDataSet)
+
+#Identifying data issues:
+#Parameters considered: 
+#id to be considered as primary key
+#Date format should be uniform
+#Identifying columns having all null values
+
+#Data Cleaning
+colnames(LoanDataSet)
+#Cleaning up columns with all null values as they are not helpful in analysis.
+ncol(LoanDataSet) #Pre Snapshot of Number of Columns
+temp_loan_data <- as.data.table(LoanDataSet) #Create a Temporary data table of loadn data set
+Loan_Data <- temp_loan_data[,which(unlist(lapply(temp_loan_data, function(x)!all(is.na(x))))),with=F] #Remove all columns having only null values
+ncol(Loan_Data) #Post Snapshot of Number of Columns , which is only 57
+
+#Check for duplicate values
+sum(duplicated(Loan_Data$id)) #Output is 0 , no duplicate values
+
+#Spliting Month and year of issue date into two columns 
+Loan_Data$issue_month <- str_split_fixed(Loan_Data$issue_d, "-", 2)[,1]
+Loan_Data$issue_year <-  as.numeric(str_split_fixed(Loan_Data$issue_d, "-", 2)[,2])
+
+#Converting year to YYYY format
+
+Loan_Data$issue_year <- as.numeric(ifelse(Loan_Data$issue_year>9,paste("20",Loan_Data$issue_year,sep = ""),paste("200",Loan_Data$issue_year,sep = "")))
+
+#issue_d column no longer required, hence removing the column
+Loan_Data$issue_d <- NULL
+#Creating a list containing column names and the output of validation of NA and blank values
+#Value = 0 implies there is no null value or blanks in that column
+Validation <- lapply(Loan_Data, function(x) sum(is.na(x), length(which(x == ""))))
+View(Validation)
+#From the above we see that we have NA/blanks in the following columns 
+#emp_title -> No Data cleaning required as title can be same for many employees
+#desc -> No cleaning required
+#title -> No cleaning required as it is not a key field
+#The following fields are being left as-is as we can perform additional data cleaning as necessary
+#mths_since_last_delinq 
+#mths_since_last_record
+#revol_util
+#last_pymnt_d
+#next_pymnt_d
+#last_credit_pull_d
+#collections_12_mths_ex_med
+#chargeoff_within_12_mths
+#pub_rec_bankruptcies
+#tax_liens
+
+
+#We can explore few columns to do the preliminary analysis and understand the data better
+summary(Loan_Data$home_ownership) 
+  #None and other can be combined into a single category 
+  Loan_Data$home_ownership[Loan_Data$home_ownership == 'NONE'] <- 'OTHER'
+
+summary(Loan_Data$annual_inc) #Values range from 4000 to 6000000
+summary(Loan_Data$loan_status) #We can notice 5627 loans have been written off or unlikely to be recollected
+summary(Loan_Data$pymnt_plan) 
+  #Since only one value thoughout we can remove this column
+  Loan_Data$pymnt_plan <- NULL
+summary(Loan_Data$dti) #Seems reasonable at 30%. If ration is high then high risk of default.
+summary(Loan_Data$total_acc) #higher credit line indicates higher risk of default
+
+#Summary of Loan Data
+summary(Loan_Data)
+#Some insights from above summary ->
+# 1) loan amount range is 500 to 3500 
+# 2) Only 2 loan terms i.e. 36 months and 60 months
+# 3) Interest Rates are not in specific numbers , more research has to be done.
+# 4) Installments vary from 20$ to 1305$ a month
+# 5) Employment lengths look reasonable without any unusual values
+# 6) Annual income might need more research as the max value seems to be more
+
+
+#To Find whether a person defaults or not we need to consider only fully paid loans or charged off loans
+
+Loan_Data_Default <- filter(Loan_Data,loan_status=="Fully Paid" | loan_status=="Charged Off") #Removed current loans
+
+#For easier analysis in terms of true or false , we can consider Fully paid loans as 0 and charged off loans as 1
+Loan_Data_Default$loan_binary_status <- ifelse(Loan_Data_Default$loan_status == "Fully Paid", 0, 1)
+
+#Current Dataset contains more columns than actually needed for analysis , we can further reduce the number of columns.
+#The main business factors considered are as follows (format -> Business factor -- Dataset Attribute)
+
+# Amount of loan funded -- funded_amnt 
+# Repayment period(3 vs 5 year) -- term 
+# Higher interest rate usually signals lower credit score -- int_rate 
+# Size of the installment -- installment 
+# Loan grade assigned by the bank/lendor -- grade
+# Loan subgrade -- sub_grade
+# How long a person is employed -- emp_length
+# Person having own house or mortgaged or rented -- home_ownership 
+# Income of a person -- annual_inc 
+# Income verification -- verification_status 
+# Status of Loan (Defaulted or not) -- loan_status 
+# Purpose of Loan -- purpose 
+# Check if pattern is particular to a state -- addr_state 
+# Debt to Income ration -- dti 
+# Deliquency rate ( higher the rate higher chances of default) -- delinq_2yrs 
+# Number of inquiries of credit history -- inq_last_6mths
+# Time frame since last overdue/default of loan installment -- mths_since_last_delinq 
+# Number of credit lines -- open_acc 
+# Public records of a person such as missed payments etc. -- pub_rec 
+# Number of payments pending -- revol_bal 
+# Utilization of credit line -- revol_util 
+# Credit history age (longer the credit history the better) -- earliest_cr_line 
+# Year of issue -- issue_year 
+
+#based on the above factors we can further reduce dataset to include only the above columns
+
+Loan_Data_Final <-
+  Loan_Data_Default[, c('funded_amnt','term','int_rate','installment','grade','sub_grade','emp_length','home_ownership',
+                         'annual_inc','verification_status','loan_status','purpose','addr_state','dti','delinq_2yrs',
+                          'inq_last_6mths','mths_since_last_delinq','open_acc','pub_rec','revol_bal','revol_util',
+                           'earliest_cr_line','issue_year','loan_binary_status')]
+
+
+#extracting credit line year for further analysis and converting it to numeric
+Loan_Data_Final$cr_line_year <-  as.numeric(ifelse(  
+  as.numeric(gsub("[^0-9]", "", Loan_Data_Final$earliest_cr_line)) > 9,
+  paste("19", gsub("[^0-9]", "", Loan_Data_Final$earliest_cr_line), sep = ""),
+  paste("20", gsub("[^0-9]", "", Loan_Data_Final$earliest_cr_line), sep = "")
+))
+
+#Converting issue year also as numeric
+Loan_Data_Final$issue_year <- as.numeric(Loan_Data_Final$issue_year)
+
+#Validating the issue year and credit line year 
+min(Loan_Data_Final$issue_year)
+max(Loan_Data_Final$issue_year)
+min(Loan_Data_Final$cr_line_year)
+max(Loan_Data_Final$cr_line_year)
+
+#From the above we can derive credit history age i.e issue_year -  cr_line_year
+Loan_Data_Final$cr_hist_age <- Loan_Data_Final$issue_year - Loan_Data_Final$cr_line_year
+
+summary(Loan_Data_Final$cr_hist_age) #We notice the majority value lies below 25 years , we can categorize in groups of 5 years each for further analysis
+Loan_Data_Final$credit_history_category <-   ifelse(
+  Loan_Data_Final$cr_hist_age <= 5,
+    "0 - 5 Years",
+    ifelse (
+      Loan_Data_Final$cr_hist_age > 5 &
+        Loan_Data_Final$cr_hist_age <= 10,
+      "5-10 Years",
+      ifelse (
+        Loan_Data_Final$cr_hist_age > 10 &
+          Loan_Data_Final$cr_hist_age <= 15,
+        "10-15 Years",
+        ifelse (
+          Loan_Data_Final$cr_hist_age > 15 &
+            Loan_Data_Final$cr_hist_age <= 20,
+          "15-20 Years",
+          ifelse (
+            Loan_Data_Final$cr_hist_age > 20 &
+              Loan_Data_Final$cr_hist_age <= 25,
+            "20-25 Years",
+            "> 25 Years"
+          )
+        )
+      )))
+    
+
+
+#We can summarise the dataset to see if any pattern exists for fully paid and charged off 
+
+Loan_Data_Summary <- group_by(Loan_Data_Final,loan_status)
+summarise(Loan_Data_Summary,median(funded_amnt),median(installment),median(annual_inc),median(dti),median(open_acc),mean(pub_rec),median(cr_hist_age))
+
+#From above we notice for charged off loan
+#1.Higher median loan amount
+#2.Higher interest rate 
+#3.Lower income 
+#4.Higher dti
+#5.Lower credit accounts
+#6.Higher avg derogatory remarks 
+#7.Lower age of credit
+
+#Bar plot showing the number of loans for each grade, status and credit age
+ggplot(data = Loan_Data_Final, aes(
+  x = factor(grade),
+  fill = factor(credit_history_category)
+)) +
+  geom_bar(alpha = 0.7, position = "dodge") +
+  xlab("Grade") + ylab("Count") + labs(fill = 'Credit History Range') +
+  facet_grid(. ~ Loan_Data_Final$loan_status, scales = "free_x") 
+
+#Plot showing number of loans for each subgrade
+
+ggplot(Loan_Data_Final,aes(x=factor(sub_grade),fill=factor(loan_status))) +
+  geom_bar(stat='count',position = "dodge")+
+  ggtitle("Count of Loan Under Each Sub Grade")+
+  labs(x="SubGrade", y="Count")+
+  labs(fill="Loan Status")
+
+
+#Grouping loans by grade to calculate defaults
+Loan_Group_Grade <-  setNames(
+  aggregate(
+    Loan_Data_Final$grade,
+    by = list(Loan_Data_Final$loan_status, Loan_Data_Final$grade),
+    FUN = length
+  ),
+  c("Loan_status", "Grade", "Count")
+)
+
+
+Loan_Group_Grade <-  spread(Loan_Group_Grade[, c(2, 1, 3)],Loan_status, Count)
+
+Loan_Group_Grade$Percent_of_total <- round(100 * Loan_Group_Grade$`Charged Off` / (Loan_Group_Grade$`Fully Paid` + 
+                                                                                     Loan_Group_Grade$`Charged Off`
+    ),
+    2
+  )
+
+#Calculating similarly for sub grades
+Loan_Group_SubGrade <-  setNames(
+  aggregate(
+    Loan_Data_Final$grade,
+    by = list(Loan_Data_Final$loan_status, Loan_Data_Final$sub_grade),
+    FUN = length
+  ),
+  c("Loan_status", "SubGrade", "Count")
+)
+
+#Re arranging columns 
+Loan_Group_SubGrade <-  spread(Loan_Group_SubGrade[, c(2, 1, 3)],Loan_status, Count)
+
+Loan_Group_SubGrade$Percent_of_total <- round(100 * Loan_Group_SubGrade$`Charged Off` / (Loan_Group_SubGrade$`Fully Paid` + 
+                                                                                           Loan_Group_SubGrade$`Charged Off`
+),
+2
+)
+
+
+
+ggplot(filter(melt(Loan_Group_Grade),variable == "Percent_of_total"),
+       aes(x = factor(Grade), y = value, fill = variable)) +
+  geom_bar(stat = 'identity',
+           position = "dodge") +
+  xlab("Grade") + ylab("Count") + labs(fill = 'Percent of Default to Total Loans')
+
+
+ggplot(filter(melt(Loan_Group_SubGrade),variable == "Percent_of_total"),
+       aes(x = factor(SubGrade), y = value, fill = variable)) +
+  geom_bar(stat = 'identity',
+           position = "dodge") +
+  xlab("SubGrade") + ylab("Count") + labs(fill = 'Percent of Default to Total Loans')
+
+
+#From the above we can come to a conclusion higher the grade in chronological order of alphabets has a higher rate of default
+#Also under each sub category higher the number then higher the default i.e default of f1 is less than default of f5 . THere are few exceptions though.
+
+
+#Performing the similar grouping using dti as a lower dti indicates a lower percentage of default
+
+min(Loan_Data_Final$dti)
+max(Loan_Data_Final$dti)
+#splitting into similar categories like grade
+
+Loan_Data_Final$dti_category <-
+  ifelse(
+    Loan_Data_Final$dti <= 5,
+    "<5%",
+    ifelse (
+      Loan_Data_Final$dti > 5 & Loan_Data_Final$dti <= 10,
+      "5-10 %",
+      ifelse (
+        Loan_Data_Final$dti > 10 & Loan_Data_Final$dti <= 15,
+        "10-15 %",
+        ifelse (
+          Loan_Data_Final$dti > 15 & Loan_Data_Final$dti <= 20,
+          "15-20 %",
+          ifelse (
+            Loan_Data_Final$dti > 20 &
+              Loan_Data_Final$dti <= 25,
+            "20-25 %",
+            "> 25 %"
+          )
+        )
+      )
+    )
+  )
+
+
+Loan_Group_DTI <-  setNames(
+  aggregate(
+    Loan_Data_Final$dti_category,
+    by = list(Loan_Data_Final$loan_status, Loan_Data_Final$dti_category),
+    FUN = length
+  ),
+  c("Loan_status", "DTI_Cat", "Count")
+)
+
+#Re arranging columns 
+Loan_Group_DTI <-  spread(Loan_Group_DTI[, c(2, 1, 3)],Loan_status, Count)
+
+Loan_Group_DTI$Percent_of_total <- round(100 * Loan_Group_DTI$`Charged Off` / (Loan_Group_DTI$`Fully Paid` + 
+                                                                                 Loan_Group_DTI$`Charged Off`
+),
+2
+)
+
+View(Loan_Group_DTI)
+
+ggplot(filter(melt(Loan_Group_DTI),variable == "Percent_of_total"),
+       aes(x = factor(DTI_Cat), y = value, fill = variable)) +
+  geom_bar(stat = 'identity',
+           position = "dodge") +
+  xlab("DTI Category") + ylab("Count") + labs(fill = 'Percent of Default to Total Loans')
+
+#From above we can conclude higher the percent then higher the rate of default
+
+#Proceeding further to see if any of the other parameters affect the loan default 
+
+Loan_Data_Ownership <- group_by(Loan_Data_Final,home_ownership)
+summarise(Loan_Data_Ownership,mean(loan_binary_status)) #Implies has no significant impact on loan default as all values are around 1
+
+Loan_Data_EmpLength <- group_by(Loan_Data_Final,emp_length)
+summarise(Loan_Data_EmpLength,mean(loan_binary_status)) #Implies has no significant impact on loan default as all values are around 1
+
+###########################################################################################################################################################
+#All the previous steps the analysis was done only based on one variable , there might be two variables/factors which might
+#affect the default of loan
+
+
+sapply(Loan_Data_Final,class)
+#We need to convert fields to numberic in order to perform co relation analysis.
+#int_rate has tobe converted to a numeric 
+
+Loan_Data_Bivariate <- Loan_Data_Final
+
+Loan_Data_Bivariate$int_rate <- as.numeric(gsub(Loan_Data_Bivariate$int_rate,pattern = "%",replacement = ""))
+Loan_Data_Bivariate$term <- as.numeric(gsub(Loan_Data_Bivariate$term,pattern = " months",replacement = ""))
+Loan_Data_Bivariate$annual_inc <- as.numeric(Loan_Data_Bivariate$annual_inc)
+
+#Removing all non numeric columns from dataframes
+Loan_Data_Bivariate <- Loan_Data_Bivariate[sapply(Loan_Data_Bivariate, is.numeric)]
+summary(Loan_Data_Bivariate)
+
+#We notice the mths_since_last_delinq is NA for most records , we can remove the attribute
+Loan_Data_Bivariate$mths_since_last_delinq <- NULL 
+
+ggcorrplot(cor(Loan_Data_Bivariate), p.mat = cor_pmat(Loan_Data_Bivariate),
+           hc.order = TRUE, type = "upper",
+           color = c("#FC4E07", "white", "#00AFBB"),
+           outline.col = "white", lab = TRUE)
+levelplot(cor(Loan_Data_Bivariate))
+
+#Based on the analysis of the correlation  plot, the following can be inferred :-
+# 1. int (a higher interest rate signals a higher chance of default )
+# 2. annual_inc (A higher annual income signals a lower default chance)
+# 3. cr_hist_age ( greater the age of credit history lower is the chance of default)
+# 4. dti (higher the dti higher chances of default)
+# 5. term (Higer term has lower chances of default)
+
+#Conclusions and Recommendations
+#The following fields seem to have an impact on the probability of a loan getting Charged off (Default).
+#Based on the analysis and plots depicted we can confidently say that the company can base their 
+#loan decision using the below parameters and observations mentioned alongside. 
+
+#S.No. Field            Field Business Desc         Observations for default  
+#----- ------           --------------------        ------------------------------
+# 1.   grade            LC assigned loan grade      Lower the grade (E,F etc.), higher the chance of default
+# 2.   subgrade         LC assigned loan subgrade    Within a grade, higher subgrade(4,5 etc.) signals higher chace of default
+# 3.   term             # of loan payments          higher term has lesser chances of default
+# 4.   int_rate         Interest rate of loan       Increasing interest rate, increases the chance of default
+# 5.   dti              Debt to inc ratio           Increasing dti, increases the chance of default
+# 6.   pub_rec          # of Derorgatory remarks    Increasing derogatory remarks, increase the chance of default  
+# 7.   open_acc         # of Credit lines open      Lower the credit lines, higher the chance of default
+# 8.   funded_amnt      Loan amount approved        Higher the loan amount, higher the chance of default
+# 9.   installment      Monthly installment         Increasing installment, increases the chance of default    
+# 10.  annual_inc       Annual Income               Lower the income, higher the chance of default 
+# 11.  cr_hist_age      credit hist age             Higher the age of credit history lower are the chances of default
+
