@@ -1,0 +1,588 @@
+#Load the Essential libraries
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(car)
+library(mass)
+library(stringr)
+
+# Read the Carprice file into the R-Studio
+
+carprice<-read.csv('CarPrice_Assignment.csv',stringsAsFactors = TRUE)
+str(carprice)
+View(carprice)
+
+#Removing the unwanted columns
+carprice$car_ID<-NULL
+View(carprice)
+#The CarName Attribute should be stored as Character
+
+carprice$CarName<-as.character(carprice$CarName)
+str(carprice)
+
+#Check if any dupliate rows are present in the Data Frame
+carprice[which(duplicated(carprice)), ] # no duplicated rows
+
+#Checking for the NA Values if any
+sum(is.na(carprice)) # no missing values
+
+
+#Removing the outliers from the Dataset
+
+quantile(carprice$horsepower,seq(0,1,0.01))
+# horsepower Variable has some outliers,there is a jump in value at 98%
+# setting values > 184.00 to 184  
+carprice$horsepower[which(carprice$horsepower>184.00)]<-184.00
+
+
+quantile(carprice$enginesize,seq(0,1,0.01))
+#enginesize variable sees sudden jump at 99%
+# setting values > 256.08 to 256.08
+carprice$enginesize[which(carprice$enginesize>256.08)] <- 256.08
+View(carprice)
+
+#Separating the Carname variables to Company Name/model name
+
+str(carprice)
+
+carprice <- separate(carprice, CarName, c('company', 'model'), 
+                 sep = '[[:blank:]]', extra = 'merge', fill = 'right')
+# exclude model from analysis
+carprice <- carprice[, -c(3)] 
+View(carprice)
+str(carprice)
+carprice$company <- as.factor(carprice$company)
+
+#Cleaning the Incorrect names of the Car Companies:
+#This is to avoid creation of extra column when the categorical data is converted to numeric
+
+# misspelt company names
+table(carprice$company)
+
+levels(carprice$company)[levels(carprice$company)=="porcshce"] <- "porsche"
+levels(carprice$company)[levels(carprice$company)=="Nissan"]   <- "nissan"
+levels(carprice$company)[levels(carprice$company)=="toyouta"]  <- "toyota"
+levels(carprice$company)[levels(carprice$company)=="vokswagen"]<- "volkswagen"
+levels(carprice$company)[levels(carprice$company)=="maxda"]    <- "mazda"
+levels(carprice$company)[levels(carprice$company)=="vw"]    <- "volkswagen"
+levels(carprice$company)[levels(carprice$company)=="alfa-romero"]    <- "alfa-romeo"
+View(carprice)
+
+#Converting Factor Variable FuelType to Numeric:
+
+summary(levels(carprice$fueltype))
+levels(carprice$fueltype)<-c(1,0)
+carprice$fueltype<-as.numeric(levels(carprice$fueltype))[carprice$fueltype]
+
+#Converting Factor Variable Aspiration to Numeric:
+
+levels(carprice$aspiration)<-c(1,0)
+carprice$aspiration<-as.numeric(levels(carprice$aspiration))[carprice$aspiration]
+
+#converting Factor variable DoorNumber to Numeric:
+
+levels(carprice$doornumber)<-c(1,0)
+carprice$doornumber<-as.numeric(levels(carprice$doornumber))[carprice$doornumber]
+
+#converting Factor variable Engine allocation to Numeric:
+
+levels(carprice$enginelocation)<-c(1,0)
+carprice$enginelocation<-as.numeric(levels(carprice$enginelocation))[carprice$enginelocation]
+
+#Converting Factor Variable CarBody to Numeric:
+
+
+dummy_1 <- data.frame(model.matrix( ~carbody, data = carprice))
+dummy_1<-dummy_1[,-1]
+
+#Combine the Dummy variable to the Main Matrix:
+
+carprice<-cbind(carprice[,-6],dummy_1)
+
+#Converting Factor Variable EngineType to Numeric:
+
+dummy_2<-data.frame(model.matrix(~enginetype,data = carprice))
+dummy_2<-dummy_2[,-1]
+
+#Combine the Dummy variable EngineBody to the Main Matrix:
+
+carprice<-cbind(carprice[,-13],dummy_2)
+
+#Converting Factor Variable EngineType to Numeric:
+
+dummy_3<-data.frame(model.matrix(~drivewheel,data = carprice))
+dummy_3<-dummy_3[,-1]
+
+#Combine the Dummy variable EngineBody to the Main Matrix:
+
+carprice<-cbind(carprice[,-6],dummy_3)
+
+#Converting Factor Variable CylinderNumber to Numeric:
+
+dummy_4<-data.frame(model.matrix(~cylindernumber,data = carprice))
+dummy_4<-dummy_4[,-1]
+
+#Combine the Dummy variable CylinderNumber to the Main Matrix:
+
+carprice<-cbind(carprice[,-12],dummy_4)
+
+#Converting Factor Variable FuelSystem to Numeric:
+
+dummy_5<-data.frame(model.matrix(~fuelsystem,data = carprice))
+dummy_5<-dummy_5[,-1]
+
+#Combine the Dummy variable FuelSystem to the Main Matrix:
+
+carprice<-cbind(carprice[,-13],dummy_5)
+View(carprice)
+levels(carprice$company)
+
+#Converting Factor Variable company to Numeric:
+
+dummy_6<-data.frame(model.matrix(~company,data = carprice))
+dummy_6<-dummy_6[,-1]
+
+#Combine the Dummy variable for company to the Main Matrix:
+
+carprice<-cbind(carprice[,-2],dummy_6)
+
+#Building the Multiple linear regression model for the dataset:
+#Set the Seed and divide the data into training and test data set
+
+set.seed(100)
+
+train_ind<-sample(1:nrow(carprice),0.7*nrow(carprice))
+
+train_data<-carprice[train_ind,]
+View(train_data)
+test_set <-carprice[-train_ind,]
+
+#Executing the First Multi Model:
+
+model_1<-lm(price~.,data = train_data)
+summary(model_1)
+
+#The Summary of the above model has many insignificant variables
+
+#Using the StepAIC function on the Training dataset to find
+
+stepAIC(model_1,direction = "both")
+
+model_2 <- lm(formula = price ~ aspiration + enginelocation + wheelbase + 
+                carwidth + curbweight + enginesize + stroke + peakrpm + carbodyhatchback + 
+                carbodysedan + carbodywagon + enginetypel + enginetypeohcf + 
+                drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                cylindernumbersix + companybmw + companybuick + companydodge + 
+                companyhonda + companyisuzu + companyjaguar + companymazda + 
+                companymercury + companymitsubishi + companynissan + companyplymouth + 
+                companyrenault + companysaab + companytoyota + companyvolkswagen + 
+                companyvolvo + enginetypeohc, data = train_data)
+
+summary(model_2)
+vif(model_2)
+
+#carbodysedan vif = 7.167 & p =  0.211
+model_3 <- lm(formula = price ~ aspiration + enginelocation + wheelbase + 
+                carwidth + curbweight + enginesize + stroke + peakrpm + carbodyhatchback + 
+                carbodywagon + enginetypel + enginetypeohcf + 
+                drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                cylindernumbersix + companybmw + companybuick + companydodge + 
+                companyhonda + companyisuzu + companyjaguar + companymazda + 
+                companymercury + companymitsubishi + companynissan + companyplymouth + 
+                companyrenault + companysaab + companytoyota + companyvolkswagen + 
+                companyvolvo + enginetypeohc, data = train_data)
+summary(model_3)
+vif(model_3)
+
+#enginesize, carwidth & curbweight continue to have high vif but they are highly significant. 
+#Hence removing wheelbase with vif = 7.99 & p > 0.05
+
+#enginetypeohc vif = 10.69 & p = 0.155
+model_4 <- lm(formula = price ~ aspiration + enginelocation + wheelbase + 
+                carwidth + curbweight + enginesize + stroke + peakrpm + carbodyhatchback + 
+                carbodywagon + enginetypel + enginetypeohcf + 
+                drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                cylindernumbersix + companybmw + companybuick + companydodge + 
+                companyhonda + companyisuzu + companyjaguar + companymazda + 
+                companymercury + companymitsubishi + companynissan + companyplymouth + 
+                companyrenault + companysaab + companytoyota + companyvolkswagen + 
+                companyvolvo, data = train_data)
+summary(model_4)
+vif(model_4)
+
+##enginesize, carwidth & curbweight continue to have high vif but they are highly significant. 
+#This may be due to multicolinearity and we should check for it 
+#c1<-data.frame(carprice$enginesize,carprice$carwidth,carprice$curbweight)
+#cor(c1)
+
+#Removing Curbweight variable as it is has very high multicolinearity and as an independent variable it
+#is heavily dependent on Carwidth and Engine Size 
+
+#wheelbase vif = 7.6019 & p = 0.1936
+model_5 <- lm(formula = price ~ aspiration + enginelocation +
+                carwidth + curbweight + enginesize + stroke + peakrpm + carbodyhatchback + 
+                carbodywagon + enginetypel + enginetypeohcf + 
+                drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                cylindernumbersix + companybmw + companybuick + companydodge + 
+                companyhonda + companyisuzu + companyjaguar + companymazda + 
+                companymercury + companymitsubishi + companynissan + companyplymouth + 
+                companyrenault + companysaab + companytoyota + companyvolkswagen + 
+                companyvolvo, data = train_data)
+summary(model_5)
+vif(model_5)
+
+#remove compnyvolvo since p = 0.0713 & vif = 2.89
+
+model_6 <- lm(formula = price ~ aspiration + enginelocation +
+                carwidth + curbweight + enginesize + stroke + peakrpm + carbodyhatchback + 
+                carbodywagon + enginetypel + enginetypeohcf + 
+                drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                cylindernumbersix + companybmw + companybuick + companydodge + 
+                companyhonda + companyisuzu + companyjaguar + companymazda + 
+                companymercury + companymitsubishi + companynissan + companyplymouth + 
+                companyrenault + companysaab + companytoyota + companyvolkswagen
+              , data = train_data)
+summary(model_6)
+vif(model_6)
+
+
+# remove carbodyhtchbck since p = 0.4389
+
+model_7 <- lm(formula = price ~ aspiration + enginelocation +
+                carwidth + curbweight + enginesize + stroke + peakrpm +  
+                carbodywagon + enginetypel + enginetypeohcf + 
+                drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                cylindernumbersix + companybmw + companybuick + companydodge + 
+                companyhonda + companyisuzu + companyjaguar + companymazda + 
+                companymercury + companymitsubishi + companynissan + companyplymouth + 
+                companyrenault + companysaab + companytoyota + companyvolkswagen
+              , data = train_data)
+summary(model_7)
+vif(model_7)
+
+# enginesize and carwidth still shows high vif and highly significant at the same time
+#cor(carprice$carwidth, carprice$enginesize)   # colinearity is high @ 0.744
+# remove carwidth --> no major impact on r squared or adjusted r squared value
+
+#removing companyisuzu, it has no significance p = 0.11 with vif 1.46 
+model_8 <- lm(formula = price ~ aspiration + enginelocation +
+                carwidth + curbweight + enginesize + stroke + peakrpm +  
+                carbodywagon + enginetypel + enginetypeohcf + 
+                drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                cylindernumbersix + companybmw + companybuick + companydodge + 
+                companyhonda + companyjaguar + companymazda + 
+                companymercury + companymitsubishi + companynissan + companyplymouth + 
+                companyrenault + companysaab + companytoyota + companyvolkswagen
+              , data = train_data)
+
+summary(model_8)
+vif(model_8)
+
+# carbodywgon p = .2097
+model_9 <- lm(formula = price ~ aspiration + enginelocation +
+                carwidth + curbweight + enginesize + stroke + peakrpm +  
+                enginetypel + enginetypeohcf + 
+                drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                cylindernumbersix + companybmw + companybuick + companydodge + 
+                companyhonda + companyjaguar + companymazda + 
+                companymercury + companymitsubishi + companynissan + companyplymouth + 
+                companyrenault + companysaab + companytoyota + companyvolkswagen
+              , data = train_data)
+
+
+summary(model_9)
+vif(model_9)
+
+# companymurcury
+model_10 <- lm(formula = price ~ aspiration + enginelocation +
+                 carwidth + curbweight + enginesize + stroke + peakrpm +  
+                 enginetypel + enginetypeohcf + 
+                 drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                 cylindernumbersix + companybmw + companybuick + companydodge + 
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + companyplymouth + 
+                 companyrenault + companysaab + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_10)
+vif(model_10)
+
+#companysaab
+model_11 <- lm(formula = price ~ aspiration + enginelocation +
+                 carwidth + curbweight + enginesize + stroke + peakrpm +  
+                 enginetypel + enginetypeohcf + 
+                 drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                 cylindernumbersix + companybmw + companybuick + companydodge + 
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + companyplymouth + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_11)
+vif(model_11)
+
+#stroke vif = 3.68 and p = 0.013
+model_12 <- lm(formula = price ~ aspiration + enginelocation +
+                 carwidth + curbweight + enginesize + peakrpm +  
+                 enginetypel + enginetypeohcf + 
+                 drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                 cylindernumbersix + companybmw + companybuick + companydodge + 
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + companyplymouth + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_12)
+vif(model_12)
+
+#curbweight  vif = 12.53 and p = .0017
+model_13 <- lm(formula = price ~ aspiration + enginelocation +
+                 carwidth + enginesize + peakrpm +  
+                 enginetypel + enginetypeohcf + 
+                 drivewheelrwd + cylindernumberfive + cylindernumberfour + 
+                 cylindernumbersix + companybmw + companybuick + companydodge + 
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + companyplymouth + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_13)
+vif(model_13)
+
+#drivewheelrwd vif = 2.98 and p = 0.011
+model_14 <- lm(formula = price ~ aspiration + enginelocation +
+                 carwidth + enginesize + peakrpm +  
+                 enginetypel + enginetypeohcf + 
+                 cylindernumberfive + cylindernumberfour + 
+                 cylindernumbersix + companybmw + companybuick + companydodge + 
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + companyplymouth + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_14)
+vif(model_14)
+
+#peakrpm vif = 2.39 and p = 0.0065
+model_15 <- lm(formula = price ~ aspiration + enginelocation +
+                 carwidth + enginesize +
+                 enginetypel + enginetypeohcf + 
+                 cylindernumberfive + cylindernumberfour + 
+                 cylindernumbersix + companybmw + companybuick + companydodge + 
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + companyplymouth + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+
+summary(model_15)
+vif(model_15)
+
+#cylindernumberfour and cylindernumberfour have high vif and low p value. They may be corelated.
+cor(carprice$cylindernumberfour, carprice$cylindernumbersix)  # -0.6769 Highly co-related
+
+# removing cylindernumbersix as it has less impact on r squared
+model_16 <- lm(formula = price ~ aspiration + enginelocation +
+                 carwidth + enginesize +
+                 enginetypel + enginetypeohcf + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick + companydodge + 
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + companyplymouth + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_16)
+vif(model_16)
+
+#enginesize is highly corelated with carwidth, 
+#hence removing enginesize as it has less impact on adjusted r squared
+model_17 <- lm(formula = price ~ aspiration + enginelocation +
+                 carwidth + 
+                 enginetypel + enginetypeohcf + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick + companydodge + 
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + companyplymouth + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_17)
+vif(model_17)
+
+#aspiration, less significant than others with p = 0.00842
+model_18 <- lm(formula = price ~ enginelocation +
+                 carwidth + 
+                 enginetypel + enginetypeohcf + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick + companydodge + 
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + companyplymouth + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_18)
+vif(model_18)
+
+#compnydodge
+model_19 <- lm(formula = price ~ enginelocation +
+                 carwidth + enginetypel + enginetypeohcf + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick +
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + companyplymouth + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+
+summary(model_19)
+vif(model_19)
+
+#companyplymouth
+model_20 <- lm(formula = price ~ enginelocation +
+                 carwidth + enginetypel + enginetypeohcf + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick +
+                 companyhonda + companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_20)
+vif(model_20)
+
+#companyphonda
+model_21 <- lm(formula = price ~ enginelocation +
+                 carwidth + enginetypel + enginetypeohcf + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick +
+                 companyjaguar + companymazda + 
+                 companymitsubishi + companynissan + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+summary(model_21)
+vif(model_21)
+
+#companynissan
+model_22 <- lm(formula = price ~ enginelocation +
+                 carwidth + enginetypel + enginetypeohcf + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick +
+                 companyjaguar + companymazda + 
+                 companymitsubishi + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_22)
+vif(model_22)
+
+#enginetypeohcf
+model_23 <- lm(formula = price ~ enginelocation +
+                 carwidth + enginetypel + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick +
+                 companyjaguar + companymazda + 
+                 companymitsubishi + 
+                 companyrenault + companytoyota + companyvolkswagen
+               , data = train_data)
+
+summary(model_23)
+vif(model_23)
+
+#compnanyvolkswagen
+model_24 <- lm(formula = price ~ enginelocation +
+                 carwidth + enginetypel + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick +
+                 companyjaguar + companymazda + 
+                 companymitsubishi + 
+                 companyrenault + companytoyota
+               , data = train_data)
+
+summary(model_24)
+vif(model_24)
+
+#enginetypel
+model_25 <- lm(formula = price ~ enginelocation +
+                 carwidth + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick +
+                 companyjaguar + companymazda + 
+                 companymitsubishi + 
+                 companyrenault + companytoyota
+               , data = train_data)
+
+summary(model_25)
+vif(model_25)
+
+#companytoyota
+model_26 <- lm(formula = price ~ enginelocation +
+                 carwidth + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick +
+                 companyjaguar + companymazda + 
+                 companymitsubishi + 
+                 companyrenault 
+               , data = train_data)
+
+summary(model_26)
+vif(model_26)
+
+#companymitshubishi
+model_27 <- lm(formula = price ~ enginelocation +
+                 carwidth + 
+                 cylindernumberfive + cylindernumberfour + 
+                 companybmw + companybuick +
+                 companyjaguar + companymazda + 
+                 companyrenault 
+               , data = train_data)
+
+summary(model_27)
+vif(model_27)
+
+#companyrenault
+model_28 <- lm(formula = price ~ enginelocation + carwidth  +  
+                 cylindernumberfive + cylindernumberfour +
+                 companybmw + companybuick +
+                 companyjaguar + companymazda , data = train_data)
+
+summary(model_28)
+vif(model_28)
+
+#companymazda
+model_29 <- lm(formula = price ~ enginelocation + carwidth  +  
+                 cylindernumberfive + cylindernumberfour +
+                 companybmw + companybuick +
+                 companyjaguar , data = train_data)
+
+summary(model_29)
+vif(model_29)
+
+View(test_set)
+
+Predict_price<-predict(model_29,test_set[,-19])
+test_set$test_price<-Predict_price
+
+
+test_set$car_id<-seq(1,nrow(test_set))
+
+
+View(test_set)
+ggplot(test_set, aes(car_id,price)) + geom_line(aes(colour = "blue" )) + 
+  scale_x_continuous(name = "Car_id", breaks = seq(0,65,3), limits = c(0,65)) + 
+  scale_y_continuous(name = "Price", breaks = seq(0,50000,2000), limits = c(0,50000)) + geom_line(aes(x=car_id, y=test_price, colour="red"))
+
+
+
+#correlation
+
+cor_out<-cor(test_set$price,test_set$test_price)
+View(cor_out)
+
+r_squ<-cor_out^2
+View(r_squ)
+
+
+#This results in fairly good model. 
